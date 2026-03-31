@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Image Tagging System</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="container">
+
+    <h1>Human-in-the-Loop Image Tagging</h1>
+
+    <div class="main">
+
+        <!-- LEFT -->
+        <div class="left">
+            <h2>Upload Image</h2>
+
+            <label class="file-upload-btn">
+                Choose Image
+                <input type="file" id="imageInput" accept="image/*">
+            </label>
+
+            <span id="fileName" class="file-name"></span>
+
+            <div class="image-preview-wrapper">
+                <img id="imagePreview" src="" alt="Preview">
+            </div>
+
+            <button id="predictBtn" class="full-width-btn">Generate Tags</button>
+        </div>
+
+        <!-- RIGHT -->
+        <div class="right">
+            <h2>Predicted Tags</h2>
+
+            <p class="tag-instruction">
+                Click a tag to change its status:
+                <span class="legend correct">Correct</span>,
+                <span class="legend partial">Partially Correct</span>,
+                <span class="legend incorrect">Incorrect</span>
+            </p>
+
+            <div id="tagsContainer" class="tags"></div>
+        </div>
+
+    </div>
+
+    <!-- BOTTOM -->
+    <div class="bottom">
+        <h2>Add New Tags</h2>
+
+        <p class="tag-instruction">
+            Type a tag and press Enter to add it.
+        </p>
+
+        <input
+            type="text"
+            id="newTagInput"
+            placeholder="Type a tag and press Enter"
+            class="new-tag-input"
+        >
+
+        <div id="newTagsContainer" class="tags new-tags-container"></div>
+
+        <br>
+
+        <button id="submitFeedbackBtn">Submit Feedback</button>
+
+        <p id="statusMessage"></p>
+    </div>
+
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
