@@ -8,6 +8,8 @@ const newTagsContainer = document.getElementById("newTagsContainer");
 const statusMessage = document.getElementById("statusMessage");
 const fileNameSpan = document.getElementById("fileName");
 
+const API_BASE = `http://${window.location.hostname}:8000`;
+
 let selectedFile = null;
 let currentSessionId = null;
 let currentTags = [];
@@ -103,7 +105,7 @@ predictBtn.addEventListener("click", async function () {
     formData.append("file", selectedFile);
 
     try {
-        const response = await fetch("http://3.135.205.178:8000/predict", {
+        const response = await fetch(`${API_BASE}/predict`, {
             method: "POST",
             body: formData
         });
@@ -155,7 +157,7 @@ submitFeedbackBtn.addEventListener("click", async function () {
     statusMessage.textContent = "Submitting feedback...";
 
     try {
-        const response = await fetch("http://3.135.205.178:8000/submit-feedback", {
+        const response = await fetch(`${API_BASE}/submit-feedback`, {
             method: "POST",
             body: formData
         });
