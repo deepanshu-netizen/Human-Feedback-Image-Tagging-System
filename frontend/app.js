@@ -103,7 +103,7 @@ predictBtn.addEventListener("click", async function () {
     formData.append("file", selectedFile);
 
     try {
-        const response = await fetch("http://18.225.75.118:8000/predict", {
+        const response = await fetch("http://3.135.205.178:8000/predict", {
             method: "POST",
             body: formData
         });
@@ -155,7 +155,7 @@ submitFeedbackBtn.addEventListener("click", async function () {
     statusMessage.textContent = "Submitting feedback...";
 
     try {
-        const response = await fetch("http://18.225.75.118:8000/submit-feedback", {
+        const response = await fetch("http://3.135.205.178:8000/submit-feedback", {
             method: "POST",
             body: formData
         });
