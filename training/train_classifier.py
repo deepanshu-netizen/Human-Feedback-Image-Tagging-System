@@ -13,7 +13,8 @@ from backend.config import DATA_DIR, TRAINED_MODELS_DIR, DEVICE
 TRAINING_DIR = os.path.join(DATA_DIR, "training")
 
 X_PATH = os.path.join(TRAINING_DIR, "X_embeddings.npy")
-Y_PATH = os.path.join(TRAINING_DIR, "Y_labels.npy")
+Y_PATH = os.path.join(TRAINING_DIR, "Y_targets.npy")
+Y_WEIGHTS_PATH = os.path.join(TRAINING_DIR, "Y_weights.npy")
 VOCAB_PATH = os.path.join(TRAINING_DIR, "tag_vocab.json")
 
 LATEST_MODEL_PATH = os.path.join(TRAINED_MODELS_DIR, "adaptive_tagger.pt")
@@ -27,13 +28,14 @@ DROPOUT = 0.3
 
 
 class EmbeddingTagDataset(Dataset):
-    def __init__(self, x_path, y_path):
+    def __init__(self, x_path, y_path, y_weights_path):
         self.X = np.load(x_path).astype(np.float32)
         self.Y = np.load(y_path).astype(np.float32)
+        self.Y_weights = np.load(y_weights_path).astype(np.float32)
 
-        if len(self.X) != len(self.Y):
+        if len(self.X) != len(self.Y) or len(self.X) != len(self.Y_weights):
             raise ValueError(
-                f"Mismatch between X and Y lengths: {len(self.X)} vs {len(self.Y)}"
+                f"Mismatch lengths: X={len(self.X)}, Y={len(self.Y)}, Y_weights={len(self.Y_weights)}"
             )
 
     def __len__(self):
@@ -42,7 +44,8 @@ class EmbeddingTagDataset(Dataset):
     def __getitem__(self, idx):
         x = torch.tensor(self.X[idx], dtype=torch.float32)
         y = torch.tensor(self.Y[idx], dtype=torch.float32)
-        return x, y
+        y_weights = torch.tensor(self.Y_weights[idx], dtype=torch.float32)
+        return x, y, y_weights
 
 
 class AdaptiveTagClassifier(nn.Module):
@@ -86,6 +89,17 @@ def get_versioned_paths(version_id: str):
     return model_path, meta_path
 
 
+def compute_masked_bce_loss(logits, targets, weights):
+    loss_matrix = nn.functional.binary_cross_entropy_with_logits(
+        logits,
+        targets,
+        reduction="none"
+    )
+    weighted_loss = loss_matrix * weights
+    denom = weights.sum().clamp_min(1e-8)
+    return weighted_loss.sum() / denom
+
+
 def train():
     ensure_models_dir()
 
@@ -93,9 +107,11 @@ def train():
         raise FileNotFoundError(f"X file not found: {X_PATH}")
     if not os.path.exists(Y_PATH):
         raise FileNotFoundError(f"Y file not found: {Y_PATH}")
+    if not os.path.exists(Y_WEIGHTS_PATH):
+        raise FileNotFoundError(f"Y weights file not found: {Y_WEIGHTS_PATH}")
 
     vocab = load_vocab()
-    dataset = EmbeddingTagDataset(X_PATH, Y_PATH)
+    dataset = EmbeddingTagDataset(X_PATH, Y_PATH, Y_WEIGHTS_PATH)
 
     if len(dataset) == 0:
         raise ValueError("Training dataset is empty.")
@@ -116,7 +132,6 @@ def train():
         dropout=DROPOUT
     ).to(DEVICE)
 
-    criterion = nn.BCEWithLogitsLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
     version_id = generate_version_id()
@@ -136,13 +151,14 @@ def train():
     for epoch in range(NUM_EPOCHS):
         total_loss = 0.0
 
-        for batch_x, batch_y in dataloader:
+        for batch_x, batch_y, batch_weights in dataloader:
             batch_x = batch_x.to(DEVICE)
             batch_y = batch_y.to(DEVICE)
+            batch_weights = batch_weights.to(DEVICE)
 
             optimizer.zero_grad()
             logits = model(batch_x)
-            loss = criterion(logits, batch_y)
+            loss = compute_masked_bce_loss(logits, batch_y, batch_weights)
             loss.backward()
             optimizer.step()
 
@@ -150,7 +166,6 @@ def train():
 
         avg_loss = total_loss / len(dataloader)
         epoch_losses.append(avg_loss)
-
         print(f"Epoch [{epoch + 1}/{NUM_EPOCHS}] - Loss: {avg_loss:.6f}")
 
     checkpoint = {
@@ -184,6 +199,7 @@ def train():
         "versioned_model_path": versioned_model_path,
         "latest_model_path": LATEST_MODEL_PATH,
         "vocab_path": VOCAB_PATH,
+        "training_targets": "soft targets + per-label weights"
     }
 
     with open(versioned_meta_path, "w", encoding="utf-8") as f:

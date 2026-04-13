@@ -7,9 +7,12 @@ const newTagInput = document.getElementById("newTagInput");
 const newTagsContainer = document.getElementById("newTagsContainer");
 const statusMessage = document.getElementById("statusMessage");
 const fileNameSpan = document.getElementById("fileName");
+const tagCountInput = document.getElementById("tagCountInput");
+const loadingOverlay = document.getElementById("loadingOverlay");
 
 const API_BASE = `http://${window.location.hostname}:8000`;
 
+let predictionInProgress = false;
 let selectedFile = null;
 let currentSessionId = null;
 let currentTags = [];
@@ -21,6 +24,7 @@ let feedbackSubmitted = false;
 setNewTagsEnabled(false);
 submitFeedbackBtn.disabled = true;
 predictBtn.disabled = false;
+tagCountInput.disabled = false;
 
 // Show image preview
 imageInput.addEventListener("change", function () {
@@ -98,11 +102,22 @@ predictBtn.addEventListener("click", async function () {
         return;
     }
 
+    if (predictionInProgress) {
+        return;
+    }
+
     statusMessage.textContent = "";
     tagsContainer.innerHTML = "";
+    setPredictionLoading(true);
+
+    const requestedTagCount = Math.max(
+        1,
+        Math.min(20, parseInt(tagCountInput.value || "8", 10))
+    );
 
     const formData = new FormData();
     formData.append("file", selectedFile);
+    formData.append("num_tags", requestedTagCount);
 
     try {
         const response = await fetch(`${API_BASE}/predict`, {
@@ -123,9 +138,12 @@ predictBtn.addEventListener("click", async function () {
         renderTags(currentTags);
         setNewTagsEnabled(true);
         submitFeedbackBtn.disabled = false;
+        statusMessage.textContent = "Tags generated successfully.";
     } catch (error) {
         console.error(error);
         statusMessage.textContent = `Error: ${error.message}`;
+    } finally {
+        setPredictionLoading(false);
     }
 });
 
@@ -179,11 +197,31 @@ submitFeedbackBtn.addEventListener("click", async function () {
         submitFeedbackBtn.disabled = true;
         setNewTagsEnabled(false);
         predictBtn.disabled = true;
+        tagCountInput.disabled = true;
     } catch (error) {
         console.error(error);
         statusMessage.textContent = `Error: ${error.message}`;
     }
 });
+
+
+function setPredictionLoading(isLoading) {
+    predictionInProgress = isLoading;
+
+    imageInput.disabled = isLoading;
+    predictBtn.disabled = isLoading;
+    submitFeedbackBtn.disabled = isLoading || !currentSessionId || feedbackSubmitted;
+    newTagInput.disabled = isLoading || !currentSessionId || feedbackSubmitted;
+    tagCountInput.disabled = isLoading;
+
+    document.body.classList.toggle("waiting", isLoading);
+    loadingOverlay.classList.toggle("hidden", !isLoading);
+
+    if (isLoading) {
+        statusMessage.textContent = "Generating tags...";
+    }
+}
+
 
 function renderTags(tags) {
     tagsContainer.innerHTML = "";

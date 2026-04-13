@@ -1,4 +1,4 @@
-from fastapi import APIRouter, File, UploadFile, HTTPException, Depends
+from fastapi import APIRouter, File, UploadFile, HTTPException, Depends, Form
 from sqlalchemy.orm import Session
 from PIL import Image
 import io
@@ -15,13 +15,16 @@ router = APIRouter()
 @router.post("/predict", response_model=PredictResponse)
 def predict_tags(
     file: UploadFile = File(...),
+    num_tags: int = Form(8),
     db: Session = Depends(get_db)
 ):
     try:
+        num_tags = max(1, min(int(num_tags), 20))
+
         contents = file.file.read()
         image = Image.open(io.BytesIO(contents)).convert("RGB")
 
-        prediction_result = run_prediction(image)
+        prediction_result = run_prediction(image, max_tags=num_tags)
 
         image_path = save_uploaded_image(
             image=image,

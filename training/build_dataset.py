@@ -8,9 +8,13 @@ from backend.config import DB_PATH, DATA_DIR
 
 TRAINING_DIR = os.path.join(DATA_DIR, "training")
 X_PATH = os.path.join(TRAINING_DIR, "X_embeddings.npy")
-Y_PATH = os.path.join(TRAINING_DIR, "Y_labels.npy")
+Y_PATH = os.path.join(TRAINING_DIR, "Y_targets.npy")
+Y_WEIGHTS_PATH = os.path.join(TRAINING_DIR, "Y_weights.npy")
 VOCAB_PATH = os.path.join(TRAINING_DIR, "tag_vocab.json")
 META_PATH = os.path.join(TRAINING_DIR, "dataset_metadata.json")
+
+PARTIAL_TARGET = 0.5
+PARTIAL_WEIGHT = 0.5
 
 
 def ensure_training_dir():
@@ -117,15 +121,20 @@ def build_feedback_index(tag_feedback_rows):
     return feedback_by_session
 
 
-def get_positive_tags_for_session(session_row, feedback_rows_for_session):
+def get_supervision_for_session(session_row, feedback_rows_for_session):
     """
-    Label rules:
-    - correct -> positive
-    - new tags added -> positive
-    - incorrect -> ignored
-    - partial -> ignored
+    Returns:
+        {
+            tag: {"target": float, "weight": float}
+        }
+
+    Rules:
+    - correct -> target=1.0, weight=1.0
+    - incorrect -> target=0.0, weight=1.0
+    - partial -> target=0.5, weight=0.5
+    - new_tags_added -> target=1.0, weight=1.0
     """
-    positive_tags = []
+    supervision = {}
 
     for row in feedback_rows_for_session:
         tag = str(row.get("generated_tag", "")).strip().lower()
@@ -135,12 +144,17 @@ def get_positive_tags_for_session(session_row, feedback_rows_for_session):
             continue
 
         if status == "correct":
-            positive_tags.append(tag)
+            supervision[tag] = {"target": 1.0, "weight": 1.0}
+        elif status == "incorrect":
+            supervision[tag] = {"target": 0.0, "weight": 1.0}
+        elif status == "partial":
+            supervision[tag] = {"target": PARTIAL_TARGET, "weight": PARTIAL_WEIGHT}
 
     new_tags = safe_parse_list(session_row.get("new_tags_added", ""))
-    positive_tags.extend(new_tags)
+    for tag in new_tags:
+        supervision[tag] = {"target": 1.0, "weight": 1.0}
 
-    return dedupe_preserve_order(positive_tags)
+    return supervision
 
 
 def load_embedding(embedding_path):
@@ -173,9 +187,9 @@ def build_tag_vocab(session_rows, feedback_by_session):
     for session_row in session_rows:
         session_id = str(session_row["session_id"])
         feedback_rows = feedback_by_session.get(session_id, [])
-        positive_tags = get_positive_tags_for_session(session_row, feedback_rows)
+        supervision = get_supervision_for_session(session_row, feedback_rows)
 
-        for tag in positive_tags:
+        for tag in supervision.keys():
             vocab_tags.add(tag)
 
     vocab_list = sorted(vocab_tags)
@@ -207,17 +221,18 @@ def build_dataset(selected_session_ids=None):
     vocab_list, tag_to_index = build_tag_vocab(session_rows, feedback_by_session)
 
     if len(vocab_list) == 0:
-        raise ValueError("No positive tags found. Nothing to build yet.")
+        raise ValueError("No supervised tags found. Nothing to build yet.")
 
     X = []
     Y = []
+    Y_weights = []
     used_session_ids = []
 
     stats = {
         "sessions_total": 0,
         "sessions_used": 0,
         "sessions_skipped_missing_embedding": 0,
-        "sessions_skipped_no_positive_tags": 0,
+        "sessions_skipped_no_supervision": 0,
         "embedding_dim": None,
         "num_tags_in_vocab": len(vocab_list),
         "data_source": "sqlite",
@@ -236,33 +251,45 @@ def build_dataset(selected_session_ids=None):
             continue
 
         feedback_rows = feedback_by_session.get(session_id, [])
-        positive_tags = get_positive_tags_for_session(session_row, feedback_rows)
+        supervision = get_supervision_for_session(session_row, feedback_rows)
 
-        if len(positive_tags) == 0:
-            stats["sessions_skipped_no_positive_tags"] += 1
+        if len(supervision) == 0:
+            stats["sessions_skipped_no_supervision"] += 1
             continue
 
         if stats["embedding_dim"] is None:
             stats["embedding_dim"] = int(embedding.shape[0])
 
         y = np.zeros(len(vocab_list), dtype=np.float32)
-        for tag in positive_tags:
-            if tag in tag_to_index:
-                y[tag_to_index[tag]] = 1.0
+        w = np.zeros(len(vocab_list), dtype=np.float32)
+
+        for tag, info in supervision.items():
+            idx = tag_to_index.get(tag)
+            if idx is None:
+                continue
+            y[idx] = float(info["target"])
+            w[idx] = float(info["weight"])
+
+        if float(w.sum()) == 0.0:
+            stats["sessions_skipped_no_supervision"] += 1
+            continue
 
         X.append(embedding)
         Y.append(y)
-        stats["sessions_used"] += 1
+        Y_weights.append(w)
         used_session_ids.append(session_id)
+        stats["sessions_used"] += 1
 
     if len(X) == 0:
         raise ValueError("No usable sessions found after filtering.")
 
     X = np.stack(X).astype(np.float32)
     Y = np.stack(Y).astype(np.float32)
+    Y_weights = np.stack(Y_weights).astype(np.float32)
 
     np.save(X_PATH, X)
     np.save(Y_PATH, Y)
+    np.save(Y_WEIGHTS_PATH, Y_weights)
 
     with open(VOCAB_PATH, "w", encoding="utf-8") as f:
         json.dump(vocab_list, f, indent=2, ensure_ascii=False)
@@ -272,12 +299,14 @@ def build_dataset(selected_session_ids=None):
             {
                 "x_shape": list(X.shape),
                 "y_shape": list(Y.shape),
+                "y_weights_shape": list(Y_weights.shape),
                 **stats,
                 "label_rules": {
-                    "correct": "positive",
-                    "new_tags_added": "positive",
-                    "incorrect": "ignored",
-                    "partial": "ignored"
+                    "correct": {"target": 1.0, "weight": 1.0},
+                    "new_tags_added": {"target": 1.0, "weight": 1.0},
+                    "incorrect": {"target": 0.0, "weight": 1.0},
+                    "partial": {"target": PARTIAL_TARGET, "weight": PARTIAL_WEIGHT},
+                    "unreviewed": {"ignored": True}
                 }
             },
             f,
@@ -287,16 +316,15 @@ def build_dataset(selected_session_ids=None):
 
     print("Dataset built successfully.")
     print(f"Saved X: {X_PATH} | shape={X.shape}")
-    print(f"Saved Y: {Y_PATH} | shape={Y.shape}")
+    print(f"Saved Y targets: {Y_PATH} | shape={Y.shape}")
+    print(f"Saved Y weights: {Y_WEIGHTS_PATH} | shape={Y_weights.shape}")
     print(f"Saved vocab: {VOCAB_PATH} | num_tags={len(vocab_list)}")
     print(f"Saved metadata: {META_PATH}")
-    print("\nSummary:")
-    for k, v in stats.items():
-        print(f"- {k}: {v}")
-        
+
     return {
         "x_shape": list(X.shape),
         "y_shape": list(Y.shape),
+        "y_weights_shape": list(Y_weights.shape),
         "stats": stats,
         "used_session_ids": used_session_ids,
         "vocab_list": vocab_list,
