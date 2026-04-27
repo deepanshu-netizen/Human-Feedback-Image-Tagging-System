@@ -19,6 +19,94 @@ The system evolves through the following loop:
 
 ---
 
+## UI Walkthrough
+
+This section demonstrates the complete workflow of the system through the user interface.
+
+---
+
+### 1. Initial State – Upload Image
+
+The user starts by uploading an image. No predictions are shown at this stage.
+
+![Upload Empty](assets/1-webpage.png)
+
+---
+
+### 2. Upload Interface
+
+The user selects an image and can choose how many tags to generate (default is 8).
+
+![Upload Section](assets/2-upload-image.png)
+
+---
+
+### 3. Before Prediction
+
+The predicted tags section is empty before generating tags.
+
+![Predicted Empty](assets/3-prediction-empty.png)
+
+---
+
+### 4. Add Tags Disabled Initially
+
+The "Add New Tags" section is disabled until tags are generated.
+
+![Add Tags Disabled](assets/4-add-new-tags.png)
+
+---
+
+### 5. Image Loaded
+
+After selecting an image, it is previewed in the UI.
+
+![Image Loaded](assets/5-image-uploaded.png)
+
+---
+
+### 6. Tags Generated
+
+After clicking "Generate Tags", the system produces tags using:
+- RAM++ (base model)
+- Adaptive classifier (if available)
+
+![Tags Generated](assets/6-tags-generated.png)
+
+Users can click each tag to mark it as:
+- Correct
+- Partially Correct
+- Incorrect
+
+---
+
+### 7. Adding New Tags
+
+Users can add missing tags that were not predicted by the system.
+
+![Add Tags](assets/7-new-tags-added.png)
+
+---
+
+### 8. Feedback Submission
+
+Once feedback is submitted:
+- Tags are stored
+- Embeddings are saved
+- Data is used for future training
+
+![Feedback Submitted](assets/8-feedback-submitted.png)
+
+---
+
+## Key Observations
+
+- The UI acts as a **data collection engine**, not just a display.
+- Every interaction contributes to model improvement.
+- Feedback directly influences future predictions through retraining.
+
+---
+
 ## Key Features
 
 - Pretrained image tagging using **RAM++**
